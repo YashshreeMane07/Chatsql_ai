@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChatSQL — AI SQL Assistant</title>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app" id="app">
+
+<!-- ══ CONNECT MODAL ══════════════════════════════════ -->
+<div class="overlay" id="connectModal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div class="modal-logo">⚡</div>
+      <h2>Connect Your Database</h2>
+      <p>Paste your database connection URL to get started</p>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Database URL</label>
+        <input type="text" id="dbUrlInput" placeholder="postgresql://user:pass@host:5432/dbname" autocomplete="off">
+        <div class="form-hint">Supports PostgreSQL, MySQL, SQLite, MSSQL</div>
+      </div>
+      <div class="form-group">
+        <label>Quick Select</label>
+        <div class="db-quick">
+          <div class="dq-btn" onclick="setDbTemplate('postgresql')">🐘 PostgreSQL</div>
+          <div class="dq-btn" onclick="setDbTemplate('mysql')">🐬 MySQL</div>
+          <div class="dq-btn" onclick="setDbTemplate('sqlite')">🗃 SQLite</div>
+          <div class="dq-btn" onclick="setDbTemplate('mssql')">🪟 MSSQL</div>
+        </div>
+      </div>
+      <div id="connectError" class="alert-error" style="display:none"></div>
+      <button class="btn-primary" id="connectBtn" onclick="connectDB()">
+        <span id="connectBtnText">Connect Database</span>
+      </button>
+      <div class="modal-env-hint">
+        Or set <code>DATABASE_URL</code> in your <code>.env</code> file and restart the server.
+        <span class="skip-link" onclick="skipConnect()">Skip →</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SIDEBAR ════════════════════════════════════════ -->
+<aside class="sidebar" id="sidebar">
+  <div class="logo">
+    <div class="logo-mark">⚡</div>
+    <div>
+      <div class="logo-name">Chat<span>SQL</span></div>
+      <div class="logo-tag">AI Data Assistant</div>
+    </div>
+  </div>
+
+  <!-- DB Status -->
+  <div class="db-status" id="dbStatus">
+    <div class="ds-dot disconnected" id="dsDot"></div>
+    <div class="ds-info">
+      <div class="ds-label" id="dsLabel">Not connected</div>
+      <div class="ds-url" id="dsUrl">Click to connect</div>
+    </div>
+    <div class="ds-btn" onclick="openConnectModal()" title="Change database">⚙</div>
+  </div>
+
+  <!-- New chat -->
+  <button class="new-chat-btn" onclick="newChat()">
+    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    New Chat
+  </button>
+
+  <div class="sidebar-section">Conversations</div>
+  <div class="chat-history" id="chatHistory"></div>
+
+  <div class="sidebar-footer">
+    <div class="model-badge">
+      <div class="mb-icon">🤖</div>
+      <div>
+        <div class="mb-name" id="modelName">llama3-70b</div>
+        <div class="mb-sub">via Groq</div>
+      </div>
+    </div>
+    <div class="sf-links">
+      <a href="#" onclick="openSettings()">Settings</a>
+      <a href="#" onclick="exportHistory()">Export History</a>
+    </div>
+  </div>
+</aside>
+
+<!-- ══ CENTER ═════════════════════════════════════════ -->
+<div class="center">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="tb-left">
+      <div class="tb-btn" onclick="toggleSidebar()" title="Toggle sidebar">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </div>
+      <div class="tb-title" id="chatTitle">New Conversation</div>
+    </div>
+    <div class="tb-right">
+      <div class="context-display" id="contextDisplay" style="display:none">
+        <span class="ctx-dot"></span>
+        <span id="contextText">Context active</span>
+        <span class="ctx-clear" onclick="clearContext()">✕</span>
+      </div>
+      <div class="token-counter" id="tokenCounter" style="display:none">
+        <span id="tokenCount">0</span> tokens
+      </div>
+      <div class="tb-btn" onclick="toggleSchema()" title="Schema browser" id="schemaToggleBtn">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+      </div>
+      <div class="tb-btn" onclick="clearChat()" title="Clear conversation">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thread -->
+  <div class="thread" id="thread">
+    <!-- Empty state -->
+    <div class="empty-state" id="emptyState">
+      <div class="es-glyph">🔮</div>
+      <h2>Ask anything about your data</h2>
+      <p>Type a question in plain English. ChatSQL will write the SQL,<br>run it against your database, and show results — all inline.</p>
+      <div class="es-grid" id="suggestGrid"></div>
+    </div>
+  </div>
+
+  <!-- Input -->
+  <div class="input-zone" id="inputZone">
+    <div class="ctx-tags" id="ctxTags"></div>
+    <div class="input-wrap" id="inputWrap">
+      <div class="ia-left">
+        <div class="voice-btn" onclick="startVoice()" title="Voice input" id="voiceBtn">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </div>
+      </div>
+      <textarea id="mainInput" placeholder="Ask a question about your data…"
+        rows="1"
+        onkeydown="handleKey(event)"
+        oninput="autoResize(this)"></textarea>
+      <div class="ia-right">
+        <button class="send-btn" onclick="sendMessage()" id="sendBtn" title="Send (Enter)">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="input-footer">
+      <span class="key-hint"><kbd>Enter</kbd> send · <kbd>Shift+Enter</kbd> newline</span>
+      <span class="powered-by">Powered by Groq × LLaMA 3</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SCHEMA PANEL ════════════════════════════════════ -->
+<div class="schema-panel" id="schemaPanel">
+  <div class="sp-head">
+    <div class="sp-title">Schema Browser</div>
+    <div class="sp-close" onclick="toggleSchema()">✕</div>
+  </div>
+  <div class="sp-search">
+    <input type="text" placeholder="Search tables & columns…" oninput="filterSchema(this.value)" id="schemaSearch">
+  </div>
+  <div class="sp-stats" id="spStats"></div>
+  <div class="schema-tree" id="schemaTree">
+    <div class="sp-empty">Connect a database to browse schema</div>
+  </div>
+</div>
+
+</div><!-- /app -->
+
+<!-- ══ SQL EDIT MODAL ══════════════════════════════════ -->
+<div class="overlay" id="sqlEditModal" style="display:none" onclick="closeSqlEdit()">
+  <div class="modal-box wide" onclick="event.stopPropagation()">
+    <div class="modal-head compact">
+      <h3>Edit & Re-run SQL</h3>
+      <div class="mh-close" onclick="closeSqlEdit()">✕</div>
+    </div>
+    <div class="modal-body">
+      <textarea id="sqlEditArea" class="sql-edit-area" rows="10" spellcheck="false"></textarea>
+      <div id="sqlEditError" class="alert-error" style="display:none"></div>
+      <div class="modal-btns">
+        <button class="btn-secondary" onclick="closeSqlEdit()">Cancel</button>
+        <button class="btn-primary" onclick="runEditedSql()">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run SQL
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SETTINGS MODAL ═════════════════════════════════ -->
+<div class="overlay" id="settingsModal" style="display:none" onclick="closeSettings()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-head compact">
+      <h3>Settings</h3>
+      <div class="mh-close" onclick="closeSettings()">✕</div>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Groq Model</label>
+        <select id="modelSelect" onchange="saveSettings()">
+          <option value="llama3-70b-8192">LLaMA 3 70B (Best quality)</option>
+          <option value="llama3-8b-8192">LLaMA 3 8B (Fastest)</option>
+          <option value="mixtral-8x7b-32768">Mixtral 8x7B (Long context)</option>
+          <option value="gemma-7b-it">Gemma 7B</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Rows per page</label>
+        <select id="rowsPerPage" onchange="saveSettings()">
+          <option value="5">5</option>
+          <option value="10" selected>10</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Auto-chart results</label>
+        <label class="toggle-wrap">
+          <input type="checkbox" id="autoChart" onchange="saveSettings()">
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">Show chart automatically when possible</span>
+        </label>
+      </div>
+      <button class="btn-primary" onclick="closeSettings()">Save & Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VOICE MODAL ════════════════════════════════════ -->
+<div class="overlay" id="voiceModal" style="display:none" onclick="closeVoiceModal()">
+  <div class="voice-modal-box" onclick="event.stopPropagation()">
+
+    <!-- Step 1: Language Picker -->
+    <div id="voiceStep1">
+      <div class="vm-head">
+        <div class="vm-icon">🎙️</div>
+        <h3>Choose Language</h3>
+        <p>Select the language you'll speak in</p>
+        <div class="vm-close" onclick="closeVoiceModal()">✕</div>
+      </div>
+      <div class="vm-lang-grid">
+        <div class="vm-lang-btn" onclick="selectLang('en-IN','English (India)')">
+          <span class="vm-flag">🇮🇳</span>
+          <span class="vm-lang-name">English</span>
+          <span class="vm-lang-sub">India</span>
+        </div>
+        <div class="vm-lang-btn" onclick="selectLang('hi-IN','हिंदी')">
+          <span class="vm-flag">🇮🇳</span>
+          <span class="vm-lang-name">हिंदी</span>
+          <span class="vm-lang-sub">Hindi</span>
+        </div>
+        <div class="vm-lang-btn" onclick="selectLang('mr-IN','मराठी')">
+          <span class="vm-flag">🇮🇳</span>
+          <span class="vm-lang-name">मराठी</span>
+          <span class="vm-lang-sub">Marathi</span>
+        </div>
+        <div class="vm-lang-btn" onclick="selectLang('en-US','English (US)')">
+          <span class="vm-flag">🇺🇸</span>
+          <span class="vm-lang-name">English</span>
+          <span class="vm-lang-sub">US</span>
+        </div>
+        <div class="vm-lang-btn" onclick="selectLang('en-GB','English (UK)')">
+          <span class="vm-flag">🇬🇧</span>
+          <span class="vm-lang-name">English</span>
+          <span class="vm-lang-sub">UK</span>
+        </div>
+        <div class="vm-lang-btn" onclick="selectLang('ta-IN','தமிழ்')">
+          <span class="vm-flag">🇮🇳</span>
+          <span class="vm-lang-name">தமிழ்</span>
+          <span class="vm-lang-sub">Tamil</span>
+        </div>
+        <div class="vm-lang-btn" onclick="selectLang('te-IN','తెలుగు')">
+          <span class="vm-flag">🇮🇳</span>
+          <span class="vm-lang-name">తెలుగు</span>
+          <span class="vm-lang-sub">Telugu</span>
+        </div>
+        <div class="vm-lang-btn" onclick="selectLang('kn-IN','ಕನ್ನಡ')">
+          <span class="vm-flag">🇮🇳</span>
+          <span class="vm-lang-name">ಕನ್ನಡ</span>
+          <span class="vm-lang-sub">Kannada</span>
+        </div>
+        <div class="vm-lang-btn" onclick="selectLang('gu-IN','ગુજરાતી')">
+          <span class="vm-flag">🇮🇳</span>
+          <span class="vm-lang-name">ગુજરાતી</span>
+          <span class="vm-lang-sub">Gujarati</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Listening UI -->
+    <div id="voiceStep2" style="display:none">
+      <div class="vm-close-top" onclick="stopVoice()">✕</div>
+      <div class="vm-listening-wrap">
+        <div class="vm-rings" id="vmRings">
+          <div class="vm-ring r1"></div>
+          <div class="vm-ring r2"></div>
+          <div class="vm-ring r3"></div>
+          <div class="vm-mic-circle" id="vmMicCircle">
+            <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </div>
+        </div>
+        <div class="vm-bars" id="vmBars">
+          <div class="vm-bar"></div>
+          <div class="vm-bar"></div>
+          <div class="vm-bar"></div>
+          <div class="vm-bar"></div>
+          <div class="vm-bar"></div>
+          <div class="vm-bar"></div>
+          <div class="vm-bar"></div>
+        </div>
+        <div class="vm-status" id="vmStatus">Listening…</div>
+        <div class="vm-lang-active" id="vmLangActive"></div>
+        <div class="vm-interim" id="vmInterim"></div>
+      </div>
+      <div class="vm-actions">
+        <button class="vm-stop-btn" onclick="stopVoice()">
+          <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+            <rect x="4" y="4" width="16" height="16" rx="2"/>
+          </svg>
+          Stop
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

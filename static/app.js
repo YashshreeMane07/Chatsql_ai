@@ -2,6 +2,56 @@
    ChatSQL — Frontend Application
    Full conversational AI assistant for complex SQL
 ═══════════════════════════════════════════════════════ */
+// ── AUTH & ROLE ───────────────────────────────────────
+let CURRENT_USER = null;
+
+async function initAuth() {
+  try {
+    const res  = await fetch('/api/auth/me');
+    if (!res.ok) { window.location.href = '/login'; return; }
+    CURRENT_USER = await res.json();
+    applyRoleUI(CURRENT_USER);
+  } catch(e) {
+    window.location.href = '/login';
+  }
+}
+
+function applyRoleUI(user) {
+  // Role chip
+  const chip = document.getElementById('roleChip');
+  const icons = { admin:'👑', manager:'📊', analyst:'🔍', viewer:'👁' };
+  chip.textContent  = `${icons[user.role] || ''} ${user.role.charAt(0).toUpperCase()+user.role.slice(1)}`;
+  chip.className    = `role-chip ${user.role}`;
+
+  // User dropdown info
+  document.getElementById('udName').textContent  = user.name;
+  document.getElementById('udEmail').textContent = user.email;
+
+  // Show Manage Users only for admin
+  if (user.role === 'admin') {
+    document.getElementById('udAdminItem').style.display = 'flex';
+  }
+}
+
+async function doLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+
+function toggleUserMenu(event) {
+  event.stopPropagation();
+  const dd = document.getElementById('userDropdown');
+  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+  const btn = document.getElementById('userMenuBtn');
+  const dd  = document.getElementById('userDropdown');
+  if (dd && btn && !btn.contains(e.target)) {
+    dd.style.display = 'none';
+  }
+});
+
 
 // ── STATE ─────────────────────────────────────────────
 const STATE = {
@@ -26,10 +76,11 @@ const resultState = {};
 
 // ── INIT ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  await initAuth();
   loadSettings();
   loadHistory();
   renderHistory();
-  checkInitialStatus();
+  await checkInitialStatus();
   buildSuggestions();
 });
 
@@ -519,7 +570,14 @@ function buildSQLCard(sql, msgId) {
       </span>
       <div class="sql-head-btns">
         <button class="sql-hbtn" onclick="copySql(this,'${msgId}')">📋 Copy</button>
-        <button class="sql-hbtn" onclick="openSqlEdit('${msgId}')">✏️ Edit</button>
+       ${CURRENT_USER?.permissions?.custom_sql ? `<button class="sql-hbtn" onclick="openSqlEdit('${msgId}')">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Edit
+        </button>
+        <button class="sql-hbtn" onclick="rerunSql('${msgId}')">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run
+        </button>` : ''}
         <button class="sql-hbtn" onclick="rerunSql('${msgId}')">▶ Run</button>
       </div>
     </div>
@@ -539,9 +597,10 @@ function buildResultCard(r, msgId) {
       </div>
       <div class="result-actions">
         <button class="ra-btn" id="chartBtn_${msgId}" onclick="toggleChart('${msgId}')">📊 Chart</button>
+        ${CURRENT_USER?.permissions?.export ? `
         <button class="ra-btn" onclick="exportCSV('${msgId}')">⬇ CSV</button>
         <button class="ra-btn" onclick="exportJSON('${msgId}')">⬇ JSON</button>
-        <button class="ra-btn" onclick="exportExcel('${msgId}')">⬇ Excel</button>
+        <button class="ra-btn" onclick="exportExcel('${msgId}')">⬇ Excel</button>` : ''}
       </div>
     </div>
     <div id="tblWrap_${msgId}"></div>
@@ -1083,4 +1142,99 @@ function highlightSQL(sql) {
   out = out.replace(/\b(\d+\.?\d*)\b/g, '<span class="val">$1</span>');
 
   return out;
+}
+// ── USER MANAGER ──────────────────────────────────────
+async function openUserManager() {
+  document.getElementById('userDropdown').style.display = 'none';
+  document.getElementById('userManagerModal').style.display = 'flex';
+  await loadUsers();
+}
+
+function closeUserManager() {
+  document.getElementById('userManagerModal').style.display = 'none';
+}
+
+async function loadUsers() {
+  const wrap = document.getElementById('umTableWrap');
+  wrap.innerHTML = '<div style="color:var(--t3);font-size:13px;padding:12px 0">Loading…</div>';
+  try {
+    const res   = await fetch('/api/users');
+    const users = await res.json();
+    if (!res.ok) { wrap.innerHTML = `<div style="color:var(--red);font-size:13px">${users.error}</div>`; return; }
+
+    const roleIcons = { admin:'👑', manager:'📊', analyst:'🔍', viewer:'👁' };
+    wrap.innerHTML = `
+      <div style="overflow-x:auto">
+      <table class="um-table">
+        <thead><tr>
+          <th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody>
+          ${users.map(u => `
+          <tr id="urow_${u.id}">
+            <td style="color:var(--t1);font-weight:600">${escHtml(u.name)}</td>
+            <td>${escHtml(u.email)}</td>
+            <td><span class="um-role-badge ${u.role}">${roleIcons[u.role]||''} ${u.role}</span></td>
+            <td><span class="um-status-badge ${u.is_active?'active':'inactive'}">${u.is_active?'Active':'Inactive'}</span></td>
+            <td>
+              <button class="um-action-btn" onclick="editUser(${u.id},'${escAttr(u.name)}','${escAttr(u.email)}','${u.role}',${u.is_active})">Edit</button>
+              <button class="um-action-btn danger" onclick="deleteUser(${u.id},'${escAttr(u.name)}')">Delete</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      </div>`;
+  } catch(e) {
+    wrap.innerHTML = `<div style="color:var(--red);font-size:13px">Failed to load users</div>`;
+  }
+}
+
+async function addUser() {
+  const name  = document.getElementById('umName').value.trim();
+  const email = document.getElementById('umEmail').value.trim();
+  const pass  = document.getElementById('umPassword').value.trim();
+  const role  = document.getElementById('umRole').value;
+  const errEl = document.getElementById('umAddError');
+  errEl.style.display = 'none';
+  if (!name || !email || !pass) { errEl.textContent = 'All fields are required'; errEl.style.display='block'; return; }
+  try {
+    const res  = await fetch('/api/users', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, email, password: pass, role })
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error; errEl.style.display='block'; return; }
+    document.getElementById('umName').value = '';
+    document.getElementById('umEmail').value = '';
+    document.getElementById('umPassword').value = '';
+    await loadUsers();
+  } catch(e) { errEl.textContent = e.message; errEl.style.display='block'; }
+}
+
+function editUser(id, name, email, role, isActive) {
+  const newName   = prompt('Name:', name);             if (newName === null) return;
+  const newRole   = prompt('Role (admin/manager/analyst/viewer):', role); if (newRole === null) return;
+  const newStatus = prompt('Active? (1 = yes, 0 = no):', isActive ? '1' : '0'); if (newStatus === null) return;
+  const newPass   = prompt('New password (leave blank to keep current):', '');  if (newPass === null) return;
+
+  const payload = { name: newName, role: newRole, is_active: parseInt(newStatus) };
+  if (newPass.trim()) payload.password = newPass.trim();
+
+  fetch(`/api/users/${id}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(d => {
+    if (d.success) loadUsers();
+    else alert('Error: ' + d.error);
+  });
+}
+
+async function deleteUser(id, name) {
+  if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+  try {
+    const res  = await fetch(`/api/users/${id}`, { method:'DELETE' });
+    const data = await res.json();
+    if (!res.ok) { alert('Error: ' + data.error); return; }
+    await loadUsers();
+  } catch(e) { alert('Error: ' + e.message); }
 }

@@ -2,7 +2,9 @@ import os
 import json
 import re
 import time
-from flask import Flask, request, jsonify, render_template, session
+import hashlib
+import secrets
+from flask import Flask, request, jsonify, render_template, session, redirect, url_for
 from flask_cors import CORS
 import sqlalchemy
 from sqlalchemy import create_engine, text, inspect
@@ -14,6 +16,66 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "chatsql-secret-2024")
 CORS(app)
+
+# ── ROLE PERMISSIONS ─────────────────────────────────
+ROLE_PERMISSIONS = {
+    'admin': {
+        'sql_ops':    ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+        'export':     True,
+        'custom_sql': True,
+        'manage_users': True,
+    },
+    'manager': {
+        'sql_ops':    ['SELECT', 'INSERT', 'UPDATE'],
+        'export':     True,
+        'custom_sql': True,
+        'manage_users': False,
+    },
+    'analyst': {
+        'sql_ops':    ['SELECT'],
+        'export':     True,
+        'custom_sql': False,
+        'manage_users': False,
+    },
+    'viewer': {
+        'sql_ops':    ['SELECT'],
+        'export':     False,
+        'custom_sql': False,
+        'manage_users': False,
+    },
+}
+
+def hash_password(password):
+    salt = os.getenv("SECRET_KEY", "chatsql-salt")
+    return hashlib.sha256((password + salt).encode()).hexdigest()
+
+def get_current_user():
+    return session.get('user')
+
+def require_login(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('user'):
+            return jsonify({'error': 'Not authenticated', 'redirect': '/login'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+def require_permission(permission):
+    from functools import wraps
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            user = session.get('user')
+            if not user:
+                return jsonify({'error': 'Not authenticated', 'redirect': '/login'}), 401
+            role = user.get('role', 'viewer')
+            perms = ROLE_PERMISSIONS.get(role, ROLE_PERMISSIONS['viewer'])
+            if not perms.get(permission, False):
+                return jsonify({'error': f'Your role ({role}) does not have permission for this action.'}), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
 
 # ── GROQ CLIENT ──────────────────────────────────────
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
@@ -37,6 +99,38 @@ def get_engine():
             raise e
     return _engine
 
+def init_users_table():
+    """Create chatsql_users table if not exists and seed default admin."""
+    engine = get_engine()
+    if not engine:
+        return
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS chatsql_users (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    email VARCHAR(150) NOT NULL UNIQUE,
+                    password_hash VARCHAR(255) NOT NULL,
+                    role ENUM('admin','manager','analyst','viewer') NOT NULL DEFAULT 'viewer',
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            # Seed default admin if no users exist
+            result = conn.execute(text("SELECT COUNT(*) as cnt FROM chatsql_users")).fetchone()
+            if result[0] == 0:
+                conn.execute(text("""
+                    INSERT INTO chatsql_users (name, email, password_hash, role)
+                    VALUES (:name, :email, :pwd, 'admin')
+                """), {
+                    'name': 'Admin',
+                    'email': 'admin@chatsql.com',
+                    'pwd': hash_password('admin123')
+                })
+            conn.commit()
+    except Exception as e:
+        print(f"[init_users_table] {e}")
 
 # ── SCHEMA INTROSPECTION ──────────────────────────────
 def get_schema_text():
@@ -259,7 +353,57 @@ def execute_sql(sql: str) -> dict:
 
 @app.route("/")
 def index():
+    if not session.get('user'):
+        return redirect(url_for('login_page'))
     return render_template("index.html")
+
+@app.route("/login")
+def login_page():
+    if session.get('user'):
+        return redirect(url_for('index'))
+    return render_template("login.html")
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_login():
+    data     = request.get_json(force=True)
+    email    = data.get("email", "").strip().lower()
+    password = data.get("password", "").strip()
+    if not email or not password:
+        return jsonify({"error": "Email and password required"}), 400
+    engine = get_engine()
+    if not engine:
+        return jsonify({"error": "Database not connected"}), 500
+    try:
+        with engine.connect() as conn:
+            row = conn.execute(text(
+                "SELECT id, name, email, role, is_active FROM chatsql_users WHERE email=:e AND password_hash=:p"
+            ), {"e": email, "p": hash_password(password)}).fetchone()
+        if not row:
+            return jsonify({"error": "Invalid email or password"}), 401
+        if not row[4]:
+            return jsonify({"error": "Your account is disabled. Contact admin."}), 403
+        session['user'] = {
+            "id":    row[0],
+            "name":  row[1],
+            "email": row[2],
+            "role":  row[3],
+            "permissions": ROLE_PERMISSIONS.get(row[3], ROLE_PERMISSIONS['viewer'])
+        }
+        return jsonify({"success": True, "user": session['user']})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_logout():
+    session.clear()
+    return jsonify({"success": True})
+
+@app.route("/api/auth/me", methods=["GET"])
+def api_me():
+    user = session.get('user')
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    return jsonify(user)
 
 
 @app.route("/api/status", methods=["GET"])
@@ -291,7 +435,11 @@ def api_schema():
 
 
 @app.route("/api/ask", methods=["POST"])
+@require_login
 def api_ask():
+    user  = session.get('user')
+    role  = user.get('role','viewer')
+    perms = ROLE_PERMISSIONS.get(role, ROLE_PERMISSIONS['viewer'])
     """Main endpoint: NL question → SQL → execute → return everything."""
     data = request.get_json(force=True)
     question    = data.get("question", "").strip()
@@ -310,6 +458,19 @@ def api_ask():
     sql        = llm_result.get("sql", "")
     explanation = llm_result.get("explanation", "")
     tokens_used = llm_result.get("tokens_used", 0)
+
+    # 1b. Check SQL operation permission
+    if sql:
+        first_word = sql.strip().split()[0].upper() if sql.strip() else ''
+        if first_word and first_word not in perms['sql_ops']:
+            return jsonify({
+                "question": question,
+                "generated_sql": sql,
+                "explanation": f"Your role ({role}) is not allowed to run {first_word} queries.",
+                "db_result": {"type": "error", "error": f"Permission denied: {role} role cannot execute {first_word} statements."},
+                "fix_suggestion": None,
+                "tokens_used": llm_result.get("tokens_used", 0),
+            })
 
     # 2. Execute SQL
     db_result = {}
@@ -343,7 +504,18 @@ def api_explain():
 
 
 @app.route("/api/run_sql", methods=["POST"])
+@require_login
 def api_run_sql():
+    user  = session.get('user')
+    role  = user.get('role','viewer')
+    perms = ROLE_PERMISSIONS.get(role, ROLE_PERMISSIONS['viewer'])
+    if not perms.get('custom_sql'):
+        return jsonify({"type":"error","error":f"Your role ({role}) cannot run custom SQL."}), 403
+    data  = request.get_json(force=True)
+    sql   = data.get("sql","").strip()
+    first_word = sql.split()[0].upper() if sql else ''
+    if first_word and first_word not in perms['sql_ops']:
+        return jsonify({"type":"error","error":f"Permission denied: {role} cannot execute {first_word}."}), 403
     """Execute raw SQL (for Edit & Re-run feature)."""
     data = request.get_json(force=True)
     sql  = data.get("sql", "").strip()
@@ -367,11 +539,92 @@ def api_connect():
         engine = get_engine()
         if engine is None:
             return jsonify({"error": "Could not create engine"}), 500
+        init_users_table()
         schema = get_schema_json()
         return jsonify({"connected": True, "tables": list(schema.keys())})
     except Exception as e:
         return jsonify({"connected": False, "error": str(e)}), 400
 
+# ── USER MANAGEMENT (Admin only) ──────────────────────
+@app.route("/api/users", methods=["GET"])
+@require_login
+@require_permission("manage_users")
+def api_list_users():
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT id, name, email, role, is_active, created_at FROM chatsql_users ORDER BY id"
+            )).fetchall()
+        users = [{"id":r[0],"name":r[1],"email":r[2],"role":r[3],"is_active":bool(r[4]),"created_at":str(r[5])} for r in rows]
+        return jsonify(users)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
+@app.route("/api/users", methods=["POST"])
+@require_login
+@require_permission("manage_users")
+def api_create_user():
+    data  = request.get_json(force=True)
+    name  = data.get("name","").strip()
+    email = data.get("email","").strip().lower()
+    pwd   = data.get("password","").strip()
+    role  = data.get("role","viewer")
+    if not all([name, email, pwd]):
+        return jsonify({"error": "Name, email and password are required"}), 400
+    if role not in ROLE_PERMISSIONS:
+        return jsonify({"error": "Invalid role"}), 400
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "INSERT INTO chatsql_users (name, email, password_hash, role) VALUES (:n,:e,:p,:r)"
+            ), {"n": name, "e": email, "p": hash_password(pwd), "r": role})
+            conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/users/<int:uid>", methods=["PUT"])
+@require_login
+@require_permission("manage_users")
+def api_update_user(uid):
+    data = request.get_json(force=True)
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            if "password" in data and data["password"].strip():
+                conn.execute(text(
+                    "UPDATE chatsql_users SET name=:n, role=:r, is_active=:a, password_hash=:p WHERE id=:id"
+                ), {"n":data.get("name"),"r":data.get("role"),"a":int(data.get("is_active",1)),"p":hash_password(data["password"]),"id":uid})
+            else:
+                conn.execute(text(
+                    "UPDATE chatsql_users SET name=:n, role=:r, is_active=:a WHERE id=:id"
+                ), {"n":data.get("name"),"r":data.get("role"),"a":int(data.get("is_active",1)),"id":uid})
+            conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/users/<int:uid>", methods=["DELETE"])
+@require_login
+@require_permission("manage_users")
+def api_delete_user(uid):
+    current = session.get('user',{}).get('id')
+    if uid == current:
+        return jsonify({"error": "You cannot delete your own account"}), 400
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("DELETE FROM chatsql_users WHERE id=:id"), {"id": uid})
+            conn.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 if __name__ == "__main__":
+    try:
+        init_users_table()
+    except:
+        pass
     app.run(debug=True, host="0.0.0.0", port=5000)

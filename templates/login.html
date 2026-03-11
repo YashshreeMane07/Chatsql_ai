@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChatSQL — Login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg-0:#050810; --bg-2:#0d1220; --bg-3:#131826; --bg-4:#192030;
+    --acc:#00e5b0; --acc-dk:#00c99a; --acc-glow:rgba(0,229,176,.22); --acc-dim:rgba(0,229,176,.07); --acc-border:rgba(0,229,176,.16);
+    --t1:#f0f4ff; --t2:#8494b8; --t3:#3a4a6a; --b1:#131d32; --b2:#1c2840; --b3:#273350;
+    --red:#ff5f7e; --red-dim:rgba(255,95,126,.1);
+  }
+  body {
+    min-height: 100vh; background: var(--bg-0); font-family: 'Figtree', sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    background-image:
+      radial-gradient(ellipse 70% 50% at 10% 0%, rgba(0,229,176,.07) 0%, transparent 55%),
+      radial-gradient(ellipse 50% 40% at 90% 100%, rgba(0,184,255,.05) 0%, transparent 55%);
+  }
+  .login-wrap {
+    width: 420px; max-width: 94vw;
+    animation: fadeUp .4s cubic-bezier(.34,1.3,.64,1);
+  }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
+
+  .login-logo {
+    display: flex; align-items: center; gap: 12px;
+    justify-content: center; margin-bottom: 32px;
+  }
+  .ll-mark {
+    width: 42px; height: 42px; border-radius: 12px;
+    background: linear-gradient(145deg, #00c99a, var(--acc));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; box-shadow: 0 6px 24px var(--acc-glow);
+  }
+  .ll-name { font-size: 26px; font-weight: 900; color: var(--t1); letter-spacing: -.5px; }
+  .ll-name span { color: var(--acc); }
+
+  .login-card {
+    background: var(--bg-2); border: 1px solid var(--b2);
+    border-radius: 22px; padding: 36px 34px 32px;
+    box-shadow: 0 24px 64px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.03) inset;
+    position: relative; overflow: hidden;
+  }
+  .login-card::before {
+    content:''; position:absolute; top:0; left:20%; right:20%; height:1px;
+    background: linear-gradient(90deg, transparent, rgba(0,229,176,.45), transparent);
+  }
+  .login-card h2 {
+    font-size: 22px; font-weight: 800; color: var(--t1);
+    margin-bottom: 6px; letter-spacing: -.4px;
+  }
+  .login-card p { font-size: 13.5px; color: var(--t2); margin-bottom: 28px; }
+
+  .form-group { margin-bottom: 18px; }
+  .form-group label {
+    display: block; font-size: 11px; font-weight: 700; color: var(--t3);
+    margin-bottom: 7px; text-transform: uppercase; letter-spacing: .1em;
+  }
+  .form-group input {
+    width: 100%; background: var(--bg-0); border: 1px solid var(--b2);
+    border-radius: 10px; padding: 12px 15px; font-size: 14px; color: var(--t1);
+    font-family: 'Figtree', sans-serif; outline: none;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .form-group input:focus { border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-glow); }
+  .form-group input::placeholder { color: var(--t3); }
+
+  .alert-error {
+    background: var(--red-dim); border: 1px solid rgba(255,95,126,.22);
+    border-radius: 10px; padding: 12px 15px; font-size: 13px;
+    color: var(--red); margin-bottom: 18px; display: none;
+  }
+
+  .login-btn {
+    width: 100%; background: linear-gradient(135deg, #00c99a, var(--acc));
+    color: #021a11; border: none; border-radius: 11px; padding: 14px;
+    font-size: 15px; font-weight: 800; cursor: pointer;
+    font-family: 'Figtree', sans-serif; letter-spacing: .01em;
+    box-shadow: 0 4px 24px var(--acc-glow); transition: all .22s;
+    position: relative; overflow: hidden;
+  }
+  .login-btn::before {
+    content:''; position:absolute; top:0; left:0; right:0; height:50%;
+    background: rgba(255,255,255,.15);
+  }
+  .login-btn:hover { opacity:.88; transform:translateY(-2px); }
+  .login-btn:disabled { opacity:.45; cursor:wait; transform:none; }
+
+  .login-hint {
+    text-align: center; margin-top: 20px;
+    font-size: 12px; color: var(--t3); line-height: 1.7;
+  }
+  .login-hint code {
+    background: var(--bg-3); border: 1px solid var(--b2); border-radius: 4px;
+    padding: 1px 7px; font-family: 'DM Mono', monospace; font-size: 11px; color: var(--t2);
+  }
+
+  .role-badges {
+    display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 10px;
+  }
+  .rb { background: var(--bg-3); border: 1px solid var(--b2); border-radius: 20px;
+    padding: 3px 10px; font-size: 10.5px; color: var(--t3); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-logo">
+    <div class="ll-mark">⚡</div>
+    <div class="ll-name">Chat<span>SQL</span></div>
+  </div>
+  <div class="login-card">
+    <h2>Welcome back</h2>
+    <p>Sign in to your ChatSQL account</p>
+    <div class="alert-error" id="loginError"></div>
+    <div class="form-group">
+      <label>Email Address</label>
+      <input type="email" id="loginEmail" placeholder="you@company.com" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="loginPassword" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
+    <div class="login-hint">
+      Default admin: <code>admin@chatsql.com</code> / <code>admin123</code>
+      <div class="role-badges" style="margin-top:8px">
+        <span class="rb">👑 Admin</span>
+        <span class="rb">📊 Manager</span>
+        <span class="rb">🔍 Analyst</span>
+        <span class="rb">👁 Viewer</span>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass  = document.getElementById('loginPassword').value.trim();
+  const err   = document.getElementById('loginError');
+  const btn   = document.getElementById('loginBtn');
+  err.style.display = 'none';
+  if (!email || !pass) { err.textContent = 'Please enter email and password'; err.style.display='block'; return; }
+  btn.disabled = true; btn.textContent = 'Signing in…';
+  try {
+    const res  = await fetch('/api/auth/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ email, password: pass })
+    });
+    const data = await res.json();
+    if (!res.ok) { err.textContent = data.error; err.style.display='block'; return; }
+    window.location.href = '/';
+  } catch(e) {
+    err.textContent = 'Connection error. Is the server running?'; err.style.display='block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sign In';
+  }
+}
+</script>
+</body>
+</html>

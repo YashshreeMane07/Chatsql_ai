@@ -113,6 +113,13 @@
       <div class="tb-btn" onclick="toggleSchema()" title="Schema browser" id="schemaToggleBtn">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
       </div>
+      <div class="tb-btn notif-bell" id="notifBell" onclick="openActivityLog()" title="Activity Log" style="display:none;position:relative">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span class="notif-badge" id="notifBadge" style="display:none">0</span>
+      </div>
       <div class="role-chip" id="roleChip"></div>
 <div class="tb-btn" id="userMenuBtn" onclick="toggleUserMenu(event)" title="User menu" style="position:relative">
           <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -293,6 +300,45 @@
       </div>
 
     </div>
+  </div>
+</div>
+<!-- ══ ACTIVITY LOG MODAL ════════════════════════════ -->
+<div class="overlay" id="activityModal" style="display:none" onclick="closeActivityLog()">
+  <div class="modal-box wide" style="max-height:90vh;overflow:hidden;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+    <div class="modal-head compact">
+      <h3>🔔 Activity Log</h3>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn-secondary" style="padding:6px 14px;font-size:12px" onclick="clearActivityLog()">🗑 Clear All</button>
+        <div class="mh-close" onclick="closeActivityLog()">✕</div>
+      </div>
+    </div>
+    <div class="al-filters">
+      <select id="alRoleFilter" onchange="loadActivityLog()" class="al-filter-select">
+        <option value="">All Roles</option>
+        <option value="admin">👑 Admin</option>
+        <option value="manager">📊 Manager</option>
+        <option value="analyst">🔍 Analyst</option>
+        <option value="viewer">👁 Viewer</option>
+      </select>
+      <select id="alActionFilter" onchange="loadActivityLog()" class="al-filter-select">
+        <option value="">All Actions</option>
+        <option value="login">🔐 Login</option>
+        <option value="logout">🚪 Logout</option>
+        <option value="query_select">🔍 SELECT</option>
+        <option value="query_insert">➕ INSERT</option>
+        <option value="query_update">✏️ UPDATE</option>
+        <option value="query_delete">🗑 DELETE</option>
+        <option value="export">⬇️ Export</option>
+        <option value="schema_open">📊 Schema</option>
+        <option value="query_error">⚠️ Error</option>
+      </select>
+      <button class="btn-secondary" style="padding:7px 14px;font-size:12px" onclick="loadActivityLog()">🔄 Refresh</button>
+      <span id="alTotal" style="font-size:12px;color:var(--t3);margin-left:auto"></span>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:0 24px 20px" id="alTableWrap">
+      <div style="color:var(--t3);font-size:13px;padding:20px 0;text-align:center">Loading…</div>
+    </div>
+    <div class="al-pagination" id="alPagination"></div>
   </div>
 </div>
 <!-- ══ VOICE MODAL ════════════════════════════════════ -->

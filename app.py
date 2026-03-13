@@ -128,9 +128,59 @@ def init_users_table():
                     'email': 'admin@chatsql.com',
                     'pwd': hash_password('admin123')
                 })
+                
             conn.commit()
+
+        # Create activity log table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS chatsql_activity_log (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                user_name VARCHAR(100) NOT NULL,
+                user_role VARCHAR(50) NOT NULL,
+                action_type VARCHAR(50) NOT NULL,
+                action_detail TEXT,
+                sql_query TEXT,
+                rows_affected INT DEFAULT 0,
+                status ENUM('success','error') DEFAULT 'success',
+                ip_address VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_read TINYINT(1) DEFAULT 0
+            )
+        """))
+        conn.commit()
     except Exception as e:
         print(f"[init_users_table] {e}")
+
+def log_activity(action_type, action_detail='', sql_query='', rows_affected=0, status='success'):
+    """Log user activity to chatsql_activity_log table."""
+    user = session.get('user')
+    if not user:
+        return
+    engine = get_engine()
+    if not engine:
+        return
+    try:
+        ip = request.remote_addr or 'unknown'
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO chatsql_activity_log
+                (user_id, user_name, user_role, action_type, action_detail, sql_query, rows_affected, status, ip_address)
+                VALUES (:uid, :uname, :urole, :atype, :adetail, :sql, :rows, :status, :ip)
+            """), {
+                'uid':     user.get('id'),
+                'uname':   user.get('name'),
+                'urole':   user.get('role'),
+                'atype':   action_type,
+                'adetail': action_detail[:500] if action_detail else '',
+                'sql':     sql_query[:2000]    if sql_query    else '',
+                'rows':    rows_affected,
+                'status':  status,
+                'ip':      ip,
+            })
+            conn.commit()
+    except Exception as e:
+        print(f"[log_activity] {e}")     
 
 # ── SCHEMA INTROSPECTION ──────────────────────────────
 def get_schema_text():
@@ -382,6 +432,7 @@ def api_login():
             return jsonify({"error": "Invalid email or password"}), 401
         if not row[4]:
             return jsonify({"error": "Your account is disabled. Contact admin."}), 403
+        # Log login activity after session is set temporarily
         session['user'] = {
             "id":    row[0],
             "name":  row[1],
@@ -389,12 +440,25 @@ def api_login():
             "role":  row[3],
             "permissions": ROLE_PERMISSIONS.get(row[3], ROLE_PERMISSIONS['viewer'])
         }
+        # Log the login
+        try:
+            ip = request.remote_addr or 'unknown'
+            with engine.connect() as conn2:
+                conn2.execute(text("""
+                    INSERT INTO chatsql_activity_log
+                    (user_id, user_name, user_role, action_type, action_detail, status, ip_address)
+                    VALUES (:uid, :uname, :urole, 'login', 'User logged in', 'success', :ip)
+                """), {'uid': row[0], 'uname': row[1], 'urole': row[3], 'ip': request.remote_addr or 'unknown'})
+                conn2.commit()
+        except Exception as e:
+            print(f"[login log] {e}")
         return jsonify({"success": True, "user": session['user']})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/auth/logout", methods=["POST"])
 def api_logout():
+    log_activity('logout', 'User logged out')
     session.clear()
     return jsonify({"success": True})
 
@@ -463,6 +527,7 @@ def api_ask():
     if sql:
         first_word = sql.strip().split()[0].upper() if sql.strip() else ''
         if first_word and first_word not in perms['sql_ops']:
+            
             return jsonify({
                 "question": question,
                 "generated_sql": sql,
@@ -480,7 +545,17 @@ def api_ask():
         # If error, ask Groq for a fix
         if db_result.get("type") == "error":
             fix_suggestion = suggest_fix(sql, db_result["error"], schema)
-
+# ── LOG ACTIVITY ──────────────────────────────────────
+    if db_result:
+        rtype = db_result.get('type','')
+        first_word = sql.strip().split()[0].upper() if sql.strip() else 'SELECT'
+        if rtype == 'select':
+            log_activity('query_select', f'SELECT query — {db_result.get("row_count",0)} rows returned', sql_query=sql, rows_affected=db_result.get('row_count',0), status='success')
+        elif rtype == 'dml':
+            log_activity(f'query_{first_word.lower()}', f'{first_word} query — {db_result.get("rowcount",0)} rows affected', sql_query=sql, rows_affected=db_result.get('rowcount',0), status='success')
+        elif rtype == 'error':
+            log_activity('query_error', f'Query failed: {db_result.get("error","")[:200]}', sql_query=sql, rows_affected=0, status='error')
+            
     return jsonify({
         "question":       question,
         "generated_sql":  sql,
@@ -522,6 +597,14 @@ def api_run_sql():
     if not sql:
         return jsonify({"error": "SQL required"}), 400
     result = execute_sql(sql)
+    rtype = result.get('type','')
+    first_word = sql.strip().split()[0].upper() if sql.strip() else ''
+    if rtype == 'select':
+        log_activity('query_select', f'Manual SQL — {result.get("row_count",0)} rows', sql_query=sql, rows_affected=result.get('row_count',0), status='success')
+    elif rtype == 'dml':
+        log_activity(f'query_{first_word.lower()}', f'Manual {first_word} — {result.get("rowcount",0)} rows affected', sql_query=sql, rows_affected=result.get('rowcount',0), status='success')
+    elif rtype == 'error':
+        log_activity('query_error', f'Manual SQL error: {result.get("error","")[:200]}', sql_query=sql, status='error')
     return jsonify(result)
 
 
@@ -621,6 +704,103 @@ def api_delete_user(uid):
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
+
+    # ── ACTIVITY LOG ROUTES ───────────────────────────────
+@app.route("/api/activity/log", methods=["POST"])
+@require_login
+def api_log_activity():
+    data        = request.get_json(force=True)
+    action_type = data.get('action_type', '')
+    detail      = data.get('detail', '')
+    if not action_type:
+        return jsonify({'error': 'action_type required'}), 400
+    log_activity(action_type, detail)
+    return jsonify({'success': True})
+
+@app.route("/api/activity/feed", methods=["GET"])
+@require_login
+@require_permission("manage_users")
+def api_activity_feed():
+    limit  = int(request.args.get('limit', 50))
+    offset = int(request.args.get('offset', 0))
+    role_filter   = request.args.get('role', '')
+    action_filter = request.args.get('action', '')
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            where_clauses = []
+            params = {'limit': limit, 'offset': offset}
+            if role_filter:
+                where_clauses.append('user_role = :role')
+                params['role'] = role_filter
+            if action_filter:
+                where_clauses.append('action_type LIKE :action')
+                params['action'] = f'%{action_filter}%'
+            where_sql = ('WHERE ' + ' AND '.join(where_clauses)) if where_clauses else ''
+            rows = conn.execute(text(f"""
+                SELECT id, user_id, user_name, user_role, action_type,
+                       action_detail, sql_query, rows_affected, status,
+                       ip_address, created_at, is_read
+                FROM chatsql_activity_log
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT :limit OFFSET :offset
+            """), params).fetchall()
+            total = conn.execute(text(f"""
+                SELECT COUNT(*) FROM chatsql_activity_log {where_sql}
+            """), {k:v for k,v in params.items() if k not in ('limit','offset')}).fetchone()[0]
+        return jsonify({
+            'logs': [{
+                'id': r[0], 'user_id': r[1], 'user_name': r[2], 'user_role': r[3],
+                'action_type': r[4], 'detail': r[5], 'sql_query': r[6],
+                'rows': r[7], 'status': r[8], 'ip': r[9],
+                'time': str(r[10]), 'is_read': bool(r[11]),
+            } for r in rows],
+            'total': total,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route("/api/activity/unread", methods=["GET"])
+@require_login
+@require_permission("manage_users")
+def api_activity_unread():
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            count = conn.execute(text(
+                "SELECT COUNT(*) FROM chatsql_activity_log WHERE is_read = 0"
+            )).fetchone()[0]
+        return jsonify({'count': int(count)})
+    except:
+        return jsonify({'count': 0})
+
+@app.route("/api/activity/mark_read", methods=["POST"])
+@require_login
+@require_permission("manage_users")
+def api_mark_read():
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("UPDATE chatsql_activity_log SET is_read = 1"))
+            conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route("/api/activity/clear", methods=["DELETE"])
+@require_login
+@require_permission("manage_users")
+def api_clear_activity():
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("DELETE FROM chatsql_activity_log"))
+            conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
     
 if __name__ == "__main__":
     try:

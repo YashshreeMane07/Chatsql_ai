@@ -33,6 +33,155 @@ function applyRoleUI(user) {
   }
 }
 
+// ── ACTIVITY NOTIFICATIONS ────────────────────────────
+let _alPage = 0;
+const AL_LIMIT = 30;
+
+async function fetchUnreadCount() {
+  try {
+    const res  = await fetch('/api/activity/unread');
+    const data = await res.json();
+    const badge = document.getElementById('notifBadge');
+    const count = data.count || 0;
+    if (count > 0) {
+      badge.style.display = 'flex';
+      badge.textContent   = count > 99 ? '99+' : count;
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+async function openActivityLog() {
+  document.getElementById('activityModal').style.display = 'flex';
+  _alPage = 0;
+  await loadActivityLog();
+  await fetch('/api/activity/mark_read', { method: 'POST' });
+  document.getElementById('notifBadge').style.display = 'none';
+}
+
+function closeActivityLog() {
+  document.getElementById('activityModal').style.display = 'none';
+}
+
+async function loadActivityLog() {
+  const wrap   = document.getElementById('alTableWrap');
+  const role   = document.getElementById('alRoleFilter')?.value   || '';
+  const action = document.getElementById('alActionFilter')?.value || '';
+  wrap.innerHTML = `<div class="al-empty"><div class="al-empty-icon">⏳</div><div class="al-empty-text">Loading…</div></div>`;
+
+  try {
+    const params = new URLSearchParams({ limit: AL_LIMIT, offset: _alPage * AL_LIMIT, ...(role && {role}), ...(action && {action}) });
+    const res  = await fetch(`/api/activity/feed?${params}`);
+    const data = await res.json();
+    if (!res.ok) {
+      wrap.innerHTML = `<div class="al-empty"><div class="al-empty-icon">⚠️</div><div class="al-empty-text">${data.error}</div></div>`;
+      return;
+    }
+
+    document.getElementById('alTotal').textContent = `${data.total} events`;
+
+    if (!data.logs.length) {
+      wrap.innerHTML = `
+        <div class="al-empty">
+          <div class="al-empty-icon">🔍</div>
+          <div class="al-empty-text">No activity found</div>
+          <div class="al-empty-sub">Actions will appear here as users interact</div>
+        </div>`;
+      document.getElementById('alPagination').innerHTML = '';
+      return;
+    }
+
+    const actionLabels = {
+      login:        ['🔐', 'Login'],
+      logout:       ['🚪', 'Logout'],
+      query_select: ['🔍', 'SELECT'],
+      query_insert: ['➕', 'INSERT'],
+      query_update: ['✏️', 'UPDATE'],
+      query_delete: ['🗑', 'DELETE'],
+      export:       ['⬇️', 'Export'],
+      schema_open:  ['📊', 'Schema'],
+      query_error:  ['⚠️', 'Error'],
+    };
+
+    const roleIcons = { admin:'👑', manager:'📊', analyst:'🔍', viewer:'👁' };
+
+    wrap.innerHTML = `<div class="al-feed">${data.logs.map(log => {
+      const [icon, label] = actionLabels[log.action_type] || ['•', log.action_type];
+      const t = new Date(log.time);
+      const timeStr  = formatLogTime(log.time);
+
+      return `
+      <div class="al-event ${!log.is_read ? 'unread' : ''}">
+
+        <!-- Time -->
+        <div class="al-ev-time">
+          <div>${timeStr}</div>
+        </div>
+
+        <!-- Main -->
+        <div class="al-ev-main">
+          <div class="al-ev-top">
+            <span class="al-ev-user">${escHtml(log.user_name)}</span>
+            <span class="al-role ${log.user_role}">${roleIcons[log.user_role]||''} ${log.user_role}</span>
+            <span class="al-ev-ip">${escHtml(log.ip)}</span>
+          </div>
+          <div class="al-ev-detail">${escHtml(log.detail || '')}</div>
+          ${log.sql_query ? `<div class="al-ev-sql" title="Click to expand">${escHtml(log.sql_query)}</div>` : ''}
+        </div>
+
+        <!-- Right -->
+        <div class="al-ev-right">
+          <span class="al-badge ${log.action_type}">${icon} ${label}</span>
+          <div style="display:flex;align-items:center;gap:5px">
+            <div class="al-status-dot ${log.status}"></div>
+            ${log.rows ? `<span class="al-rows-chip">${log.rows} rows</span>` : ''}
+          </div>
+        </div>
+
+      </div>`;
+    }).join('')}</div>`;
+
+    // Pagination
+    const totalPages = Math.ceil(data.total / AL_LIMIT);
+    const pg = document.getElementById('alPagination');
+    pg.innerHTML = totalPages > 1 ? `
+      <button class="pg-btn" onclick="alChangePage(${_alPage-1})" ${_alPage===0?'disabled':''}>← Prev</button>
+      <span>Page ${_alPage+1} of ${totalPages}</span>
+      <button class="pg-btn" onclick="alChangePage(${_alPage+1})" ${_alPage>=totalPages-1?'disabled':''}>Next →</button>` : '';
+
+  } catch(e) {
+    wrap.innerHTML = `<div class="al-empty"><div class="al-empty-icon">⚠️</div><div class="al-empty-text">Failed to load activity log</div></div>`;
+  }
+}
+
+async function alChangePage(page) { _alPage = page; await loadActivityLog(); }
+
+async function clearActivityLog() {
+  if (!confirm('Clear all activity logs? This cannot be undone.')) return;
+  const res = await fetch('/api/activity/clear', { method: 'DELETE' });
+  if (res.ok) { await loadActivityLog(); document.getElementById('notifBadge').style.display = 'none'; }
+}
+
+function formatLogTime(timeStr) {
+  if (!timeStr) return '';
+  const d = new Date(timeStr);
+  const diff = Date.now() - d;
+  if (diff < 60000)    return 'just now';
+  if (diff < 3600000)  return Math.floor(diff/60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+  return d.toLocaleDateString('en-IN', {day:'2-digit',month:'short'}) + ' ' + d.toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'});
+}
+
+async function logClientActivity(actionType, detail = '') {
+  try {
+    await fetch('/api/activity/log', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ action_type: actionType, detail }),
+    });
+  } catch(e) {}
+}
+
 async function doLogout() {
   await fetch('/api/auth/logout', { method: 'POST' });
   window.location.href = '/login';
@@ -77,6 +226,11 @@ const resultState = {};
 // ── INIT ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   await initAuth();
+  if (CURRENT_USER?.role === 'admin') {
+    document.getElementById('notifBell').style.display = 'flex';
+    fetchUnreadCount();
+    setInterval(fetchUnreadCount, 15000);
+  }
   loadSettings();
   loadHistory();
   renderHistory();
@@ -261,6 +415,7 @@ function toggleSchema() {
   STATE.schemaOpen = !STATE.schemaOpen;
   document.getElementById('schemaPanel').classList.toggle('collapsed', !STATE.schemaOpen);
   document.getElementById('schemaToggleBtn').classList.toggle('active', STATE.schemaOpen);
+  if (STATE.schemaOpen) logClientActivity('schema_open', 'Opened schema browser');
 }
 
 // ── SUGGESTIONS ───────────────────────────────────────
@@ -1205,6 +1360,7 @@ function copySql(btn, msgId) {
 // ── EXPORT ────────────────────────────────────────────
 function exportCSV(msgId) {
   const rs = resultState[msgId]; if (!rs?.rows?.length) return;
+  logClientActivity('export', `CSV export — ${rs.rows.length} rows`);
   const cols = rs.columns;
   let csv = cols.join(',') + '\n';
   rs.rows.forEach(row => {
@@ -1215,11 +1371,13 @@ function exportCSV(msgId) {
 
 function exportJSON(msgId) {
   const rs = resultState[msgId]; if (!rs?.rows?.length) return;
+  logClientActivity('export', `JSON export — ${rs.rows.length} rows`);
   dlFile(JSON.stringify(rs.rows, null, 2), 'result.json', 'application/json');
 }
 
 function exportExcel(msgId) {
   const rs = resultState[msgId]; if (!rs?.rows?.length) return;
+  logClientActivity('export', `Excel export — ${rs.rows.length} rows`);
   const cols = rs.columns;
   let tsv = cols.join('\t') + '\n';
   rs.rows.forEach(row => { tsv += cols.map(c => row[c]??'').join('\t') + '\n'; });

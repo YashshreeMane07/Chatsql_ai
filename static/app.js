@@ -586,6 +586,8 @@ function buildSQLCard(sql, msgId) {
 }
 
 function buildResultCard(r, msgId) {
+  const cols = r.columns;
+  const colOptions = cols.map(c => `<option value="${escAttr(c)}">${escHtml(c)}</option>`).join('');
   return `<div class="result-card" id="resultCard_${msgId}">
     <div class="result-head">
       <div class="result-stats">
@@ -596,7 +598,14 @@ function buildResultCard(r, msgId) {
         <span class="rs-item">${r.columns.length} cols</span>
       </div>
       <div class="result-actions">
-        <button class="ra-btn" id="chartBtn_${msgId}" onclick="toggleChart('${msgId}')">📊 Chart</button>
+        <button class="ra-btn" id="chartBtn_${msgId}" onclick="toggleChart('${msgId}')">
+          <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+          </svg>
+          Chart
+        </button>
         ${CURRENT_USER?.permissions?.export ? `
         <button class="ra-btn" onclick="exportCSV('${msgId}')">⬇ CSV</button>
         <button class="ra-btn" onclick="exportJSON('${msgId}')">⬇ JSON</button>
@@ -605,16 +614,67 @@ function buildResultCard(r, msgId) {
     </div>
     <div id="tblWrap_${msgId}"></div>
     <div id="paginationWrap_${msgId}"></div>
+
+    <!-- CHART ZONE -->
     <div id="chartZone_${msgId}" style="display:none" class="chart-zone">
-      <div class="chart-type-bar">
-        <button class="ct-btn active" onclick="switchChart('${msgId}','bar',this)">Bar</button>
-        <button class="ct-btn" onclick="switchChart('${msgId}','line',this)">Line</button>
-        <button class="ct-btn" onclick="switchChart('${msgId}','pie',this)">Pie</button>
-        <button class="ct-btn" onclick="switchChart('${msgId}','doughnut',this)">Donut</button>
+
+      <!-- Toolbar row 1: chart type + actions -->
+      <div class="chart-toolbar">
+        <div class="chart-type-bar">
+          <button class="ct-btn active" data-type="bar"      onclick="switchChart('${msgId}','bar',this)">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            Bar
+          </button>
+          <button class="ct-btn" data-type="line"     onclick="switchChart('${msgId}','line',this)">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 19 9 5 6 12 2 12"/></svg>
+            Line
+          </button>
+          <button class="ct-btn" data-type="area"     onclick="switchChart('${msgId}','area',this)">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 19 9 5 6 12 2 12"/><path d="M2 12v8h20v-8"/></svg>
+            Area
+          </button>
+          <button class="ct-btn" data-type="pie"      onclick="switchChart('${msgId}','pie',this)">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+            Pie
+          </button>
+          <button class="ct-btn" data-type="doughnut" onclick="switchChart('${msgId}','doughnut',this)">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+            Donut
+          </button>
+        </div>
+        <div class="chart-actions">
+          <button class="ca-btn" onclick="downloadChart('${msgId}')" title="Download PNG">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            PNG
+          </button>
+          <button class="ca-btn" onclick="openFullscreen('${msgId}')" title="Fullscreen">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            Fullscreen
+          </button>
+        </div>
       </div>
-      <div style="position:relative;height:220px">
+
+      <!-- Toolbar row 2: axis selectors -->
+      <div class="axis-selectors">
+        <div class="axis-group">
+          <label class="axis-label">X Axis</label>
+          <select class="axis-select" id="xAxis_${msgId}" onchange="renderChart('${msgId}', getCurrentChartType('${msgId}'))">
+            ${colOptions}
+          </select>
+        </div>
+        <div class="axis-group">
+          <label class="axis-label">Y Axis</label>
+          <select class="axis-select" id="yAxis_${msgId}" onchange="renderChart('${msgId}', getCurrentChartType('${msgId}'))">
+            ${colOptions}
+          </select>
+        </div>
+      </div>
+
+      <!-- Canvas -->
+      <div class="chart-canvas-wrap" id="chartWrap_${msgId}">
         <canvas id="chart_${msgId}"></canvas>
       </div>
+
     </div>
   </div>`;
 }
@@ -753,12 +813,14 @@ function canChart(rows) {
 
 function toggleChart(msgId, forceShow) {
   const zone = document.getElementById('chartZone_' + msgId);
-  const btn  = document.getElementById('chartBtn_' + msgId);
+  const btn  = document.getElementById('chartBtn_'  + msgId);
   if (!zone) return;
   const showing = zone.style.display !== 'none';
   if (forceShow === true || !showing) {
     zone.style.display = 'block';
     btn?.classList.add('active');
+    // Auto-pick best X/Y columns
+    autoSelectAxes(msgId);
     renderChart(msgId, resultState[msgId]?.chartType || 'bar');
   } else {
     zone.style.display = 'none';
@@ -767,10 +829,29 @@ function toggleChart(msgId, forceShow) {
   scrollThread();
 }
 
+function autoSelectAxes(msgId) {
+  const rs = resultState[msgId]; if (!rs) return;
+  const cols = rs.columns;
+  const xSel = document.getElementById('xAxis_' + msgId);
+  const ySel = document.getElementById('yAxis_' + msgId);
+  if (!xSel || !ySel) return;
+
+  // Find first text column for X, first numeric column for Y
+  const numericCols = cols.filter(c => rs.rows.length && !isNaN(Number(rs.rows[0][c])) && rs.rows[0][c] !== null);
+  const textCols    = cols.filter(c => !numericCols.includes(c));
+
+  xSel.value = textCols[0]    || cols[0];
+  ySel.value = numericCols[0] || cols[1] || cols[0];
+}
+
+function getCurrentChartType(msgId) {
+  return resultState[msgId]?.chartType || 'bar';
+}
+
 function switchChart(msgId, type, btn) {
   if (!resultState[msgId]) return;
   resultState[msgId].chartType = type;
-  document.querySelectorAll(`#chartZone_${msgId} .ct-btn`).forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll(`#chartZone_${msgId} .ct-btn`).forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   renderChart(msgId, type);
 }
@@ -778,59 +859,252 @@ function switchChart(msgId, type, btn) {
 function renderChart(msgId, type) {
   const rs = resultState[msgId]; if (!rs?.rows?.length) return;
   const canvas = document.getElementById('chart_' + msgId); if (!canvas) return;
-
   if (rs.chartInst) { rs.chartInst.destroy(); rs.chartInst = null; }
 
-  const keys    = rs.columns;
-  const labelKey = keys[0];
-  let valueKey  = keys.find((k,i) => i > 0 && !isNaN(Number(rs.rows[0][k])));
-  if (!valueKey) valueKey = keys.find(k => !isNaN(Number(rs.rows[0][k])));
-  if (!valueKey) return;
+  // Get selected axes
+  const xSel = document.getElementById('xAxis_' + msgId);
+  const ySel = document.getElementById('yAxis_' + msgId);
+  const labelKey = xSel ? xSel.value : rs.columns[0];
+  const valueKey = ySel ? ySel.value : (rs.columns.find((k,i) => i>0 && !isNaN(Number(rs.rows[0][k]))) || rs.columns[1] || rs.columns[0]);
 
   const labels = rs.rows.map(r => String(r[labelKey] ?? ''));
   const values = rs.rows.map(r => Number(r[valueKey]) || 0);
 
-  const isPie = type === 'pie' || type === 'doughnut';
-  const ctx   = canvas.getContext('2d');
-  const grad  = ctx.createLinearGradient(0,0,0,220);
-  grad.addColorStop(0, 'rgba(0,208,132,.65)');
-  grad.addColorStop(1, 'rgba(0,208,132,.06)');
+  const isPie  = type === 'pie' || type === 'doughnut';
+  const isArea = type === 'area';
+  const chartType = isArea ? 'line' : type;
 
-  const COLORS = ['#00d084','#00b8a4','#4ddfaa','#00a868','#7aaa8c','#3d6650','#00e5c0','#008055'];
+  const ctx  = canvas.getContext('2d');
+
+  // Gradient for bar/area
+  const grad = ctx.createLinearGradient(0, 0, 0, 280);
+  grad.addColorStop(0, 'rgba(0,229,176,.75)');
+  grad.addColorStop(1, 'rgba(0,229,176,.05)');
+
+  // Area fill gradient
+  const areaGrad = ctx.createLinearGradient(0, 0, 0, 280);
+  areaGrad.addColorStop(0, 'rgba(0,229,176,.35)');
+  areaGrad.addColorStop(1, 'rgba(0,229,176,.01)');
+
+  const PIE_COLORS = [
+    '#00e5b0','#00b8ff','#7b61ff','#ff6b9d',
+    '#ffb347','#4ecdc4','#45b7d1','#96ceb4',
+    '#ffeaa7','#fd79a8','#a29bfe','#55efc4'
+  ];
 
   rs.chartInst = new Chart(ctx, {
-    type,
+    type: chartType,
     data: {
       labels,
       datasets: [{
         label: valueKey,
         data: values,
-        backgroundColor: isPie ? COLORS : grad,
-        borderColor: '#00d084',
-        borderWidth: isPie ? 2 : 1,
-        borderRadius: type === 'bar' ? 6 : 0,
+        backgroundColor: isPie ? PIE_COLORS : isArea ? areaGrad : grad,
+        borderColor: isPie ? 'rgba(5,8,16,.6)' : '#00e5b0',
+        borderWidth: isPie ? 2 : 2,
+        borderRadius: chartType === 'bar' ? 8 : 0,
         borderSkipped: false,
-        tension: .35,
-        fill: type === 'line',
-        pointBackgroundColor: '#00d084',
-        pointRadius: type === 'line' ? 3 : 0,
+        tension: .42,
+        fill: isArea ? true : false,
+        pointBackgroundColor: '#00e5b0',
+        pointBorderColor: '#050810',
+        pointBorderWidth: 2,
+        pointRadius: (chartType === 'line' || isArea) ? 4 : 0,
+        pointHoverRadius: (chartType === 'line' || isArea) ? 7 : 0,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 500, easing: 'easeOutQuart' },
+      plugins: {
+        legend: {
+          display: isPie,
+          labels: {
+            color: '#8494b8',
+            font: { size: 12, family: 'Figtree' },
+            padding: 16,
+            usePointStyle: true,
+            pointStyleWidth: 10,
+          },
+        },
+        tooltip: {
+          backgroundColor: '#0d1220',
+          borderColor: 'rgba(0,229,176,.25)',
+          borderWidth: 1,
+          titleColor: '#f0f4ff',
+          bodyColor: '#8494b8',
+          padding: 14,
+          cornerRadius: 10,
+          titleFont: { family: 'Figtree', weight: '700', size: 13 },
+          bodyFont:  { family: 'Figtree', size: 12 },
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y ?? ctx.parsed}`
+          }
+        },
+      },
+      scales: !isPie ? {
+        y: {
+          beginAtZero: true,
+          grid:   { color: 'rgba(0,229,176,.06)', drawBorder: false },
+          border: { display: false, dash: [4,4] },
+          ticks:  { color: '#3a4a6a', font: { size: 11, family: 'Figtree' }, padding: 8 },
+        },
+        x: {
+          grid:   { display: false },
+          border: { display: false },
+          ticks:  { color: '#3a4a6a', font: { size: 11, family: 'Figtree' }, maxRotation: 40, padding: 6 },
+        },
+      } : {},
+    },
+  });
+
+  // Store chart type
+  resultState[msgId].chartType = type;
+}
+
+// ── CHART EXTRAS ──────────────────────────────────────
+function downloadChart(msgId) {
+  const canvas = document.getElementById('chart_' + msgId);
+  if (!canvas) return;
+
+  // Create white-bg version for download
+  const offscreen = document.createElement('canvas');
+  offscreen.width  = canvas.width;
+  offscreen.height = canvas.height;
+  const ctx = offscreen.getContext('2d');
+  ctx.fillStyle = '#0d1220';
+  ctx.fillRect(0, 0, offscreen.width, offscreen.height);
+  ctx.drawImage(canvas, 0, 0);
+
+  const a = document.createElement('a');
+  a.href     = offscreen.toDataURL('image/png');
+  a.download = `chart_${msgId}.png`;
+  a.click();
+}
+
+function openFullscreen(msgId) {
+  const rs = resultState[msgId]; if (!rs) return;
+
+  // Create fullscreen overlay
+  const overlay = document.createElement('div');
+  overlay.id        = 'fsOverlay';
+  overlay.className = 'fs-overlay';
+  overlay.innerHTML = `
+    <div class="fs-box">
+      <div class="fs-head">
+        <div class="fs-title">Chart — ${rs.columns.join(', ')}</div>
+        <div class="fs-actions">
+          <button class="ca-btn" onclick="downloadChartFs('${msgId}')">⬇ PNG</button>
+          <button class="ca-btn danger" onclick="closeFullscreen()">✕ Close</button>
+        </div>
+      </div>
+      <div class="chart-type-bar" style="padding:0 20px 14px">
+        <button class="ct-btn active" onclick="switchFsChart('${msgId}','bar',this)">Bar</button>
+        <button class="ct-btn" onclick="switchFsChart('${msgId}','line',this)">Line</button>
+        <button class="ct-btn" onclick="switchFsChart('${msgId}','area',this)">Area</button>
+        <button class="ct-btn" onclick="switchFsChart('${msgId}','pie',this)">Pie</button>
+        <button class="ct-btn" onclick="switchFsChart('${msgId}','doughnut',this)">Donut</button>
+      </div>
+      <div class="fs-canvas-wrap">
+        <canvas id="fsCanvas"></canvas>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.onclick = e => { if (e.target === overlay) closeFullscreen(); };
+
+  // Render chart in fullscreen canvas
+  renderFsChart(msgId, rs.chartType || 'bar');
+}
+
+let _fsChartInst = null;
+
+function renderFsChart(msgId, type) {
+  const rs = resultState[msgId]; if (!rs?.rows?.length) return;
+  const canvas = document.getElementById('fsCanvas'); if (!canvas) return;
+  if (_fsChartInst) { _fsChartInst.destroy(); _fsChartInst = null; }
+
+  const xSel = document.getElementById('xAxis_' + msgId);
+  const ySel = document.getElementById('yAxis_' + msgId);
+  const labelKey = xSel ? xSel.value : rs.columns[0];
+  const valueKey = ySel ? ySel.value : rs.columns[1] || rs.columns[0];
+
+  const labels   = rs.rows.map(r => String(r[labelKey] ?? ''));
+  const values   = rs.rows.map(r => Number(r[valueKey]) || 0);
+  const isPie    = type === 'pie' || type === 'doughnut';
+  const isArea   = type === 'area';
+  const chartType= isArea ? 'line' : type;
+
+  const ctx  = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 420);
+  grad.addColorStop(0, 'rgba(0,229,176,.75)');
+  grad.addColorStop(1, 'rgba(0,229,176,.05)');
+
+  const PIE_COLORS = ['#00e5b0','#00b8ff','#7b61ff','#ff6b9d','#ffb347','#4ecdc4','#45b7d1','#96ceb4','#ffeaa7','#fd79a8'];
+
+  _fsChartInst = new Chart(ctx, {
+    type: chartType,
+    data: {
+      labels,
+      datasets: [{
+        label: valueKey,
+        data: values,
+        backgroundColor: isPie ? PIE_COLORS : grad,
+        borderColor: isPie ? 'rgba(5,8,16,.6)' : '#00e5b0',
+        borderWidth: 2,
+        borderRadius: chartType === 'bar' ? 10 : 0,
+        tension: .42,
+        fill: isArea,
+        pointBackgroundColor: '#00e5b0',
+        pointBorderColor: '#050810',
+        pointBorderWidth: 2,
+        pointRadius: (chartType === 'line' || isArea) ? 5 : 0,
+        pointHoverRadius: 8,
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      animation: { duration: 600, easing: 'easeOutQuart' },
       plugins: {
-        legend: { display: isPie, labels: { color: '#7aaa8c', font: { size: 11 }, padding: 12 }},
+        legend: { display: isPie, labels: { color: '#8494b8', font: { size: 13, family: 'Figtree' }, padding: 20 }},
         tooltip: {
-          backgroundColor: '#0f1812', borderColor: 'rgba(0,208,132,.3)', borderWidth: 1,
-          titleColor: '#e2f0e8', bodyColor: '#7aaa8c', padding: 10, cornerRadius: 8,
-        }
+          backgroundColor: '#0d1220', borderColor: 'rgba(0,229,176,.25)', borderWidth: 1,
+          titleColor: '#f0f4ff', bodyColor: '#8494b8', padding: 16, cornerRadius: 12,
+          titleFont: { family: 'Figtree', weight: '700', size: 14 },
+          bodyFont:  { family: 'Figtree', size: 13 },
+        },
       },
       scales: !isPie ? {
-        y: { beginAtZero: true, grid: { color: 'rgba(0,208,132,.06)' }, border: { display: false }, ticks: { color: '#3d6650', font: { size: 11 }}},
-        x: { grid: { display: false }, border: { display: false }, ticks: { color: '#3d6650', font: { size: 11 }, maxRotation: 45 }}
-      } : {}
-    }
+        y: { beginAtZero: true, grid: { color: 'rgba(0,229,176,.06)' }, border: { display: false }, ticks: { color: '#3a4a6a', font: { size: 12, family: 'Figtree' } }},
+        x: { grid: { display: false }, border: { display: false }, ticks: { color: '#3a4a6a', font: { size: 12, family: 'Figtree' }, maxRotation: 40 }},
+      } : {},
+    },
   });
+}
+
+function switchFsChart(msgId, type, btn) {
+  document.querySelectorAll('#fsOverlay .ct-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderFsChart(msgId, type);
+}
+
+function downloadChartFs(msgId) {
+  const canvas = document.getElementById('fsCanvas'); if (!canvas) return;
+  const off = document.createElement('canvas');
+  off.width = canvas.width; off.height = canvas.height;
+  const ctx = off.getContext('2d');
+  ctx.fillStyle = '#0d1220';
+  ctx.fillRect(0, 0, off.width, off.height);
+  ctx.drawImage(canvas, 0, 0);
+  const a = document.createElement('a');
+  a.href = off.toDataURL('image/png');
+  a.download = `chart_fullscreen_${msgId}.png`;
+  a.click();
+}
+
+function closeFullscreen() {
+  if (_fsChartInst) { _fsChartInst.destroy(); _fsChartInst = null; }
+  document.getElementById('fsOverlay')?.remove();
 }
 
 // ── SQL EDIT / RE-RUN ─────────────────────────────────
